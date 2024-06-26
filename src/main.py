@@ -31,15 +31,18 @@ class Encryptor:
         hmac = HMAC(key, hashes.SHA256(), backend=self.backend)
         hmac.update(iv + ciphertext)
         hmac_value = hmac.finalize()
-        return salt, salt + iv + ciphertext + hmac_value
+        encrypted_data = salt + iv + ciphertext + hmac_value
+        return salt, encrypted_data
+
+    def save_to_file(self, filename: str, encrypted_data: bytes):
+        with open(filename, 'wb') as f:
+            f.write(encrypted_data)
 
 
 class Decryptor:
-    def __init__(self, password: str, salt: bytes):
+    def __init__(self, password: str):
         self.backend = default_backend()
         self.password = password
-        self.salt = salt
-        self.key = self._derive_key(password, salt)
 
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         kdf = PBKDF2HMAC(
@@ -51,17 +54,29 @@ class Decryptor:
         )
         return kdf.derive(password.encode('utf-8'))
 
-    def decrypt(self, ciphertext: bytes) -> str:
-        iv = ciphertext[16:32]
-        hmac_value = ciphertext[-32:]
-        encrypted_message = ciphertext[32:-32]
-        hmac = HMAC(self.key, hashes.SHA256(), backend=self.backend)
+    def decrypt(self, encrypted_data: bytes) -> str:
+        salt = encrypted_data[:16]
+        iv = encrypted_data[16:32]
+        hmac_value = encrypted_data[-32:]
+        encrypted_message = encrypted_data[32:-32]
+
+        key = self._derive_key(self.password, salt)
+
+        hmac = HMAC(key, hashes.SHA256(), backend=self.backend)
         hmac.update(iv + encrypted_message)
         hmac.verify(hmac_value)
-        cipher = Cipher(algorithms.AES(self.key), modes.CFB(iv), backend=self.backend)
+
+        cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=self.backend)
         decryptor = cipher.decryptor()
         plaintext = decryptor.update(encrypted_message) + decryptor.finalize()
+
         return plaintext.decode('utf-8')
+
+    @staticmethod
+    def read_from_file(filename: str) -> bytes:
+        with open(filename, 'rb') as f:
+            encrypted_data = f.read()
+        return encrypted_data
 
 
 if __name__ == "__main__":
@@ -74,8 +89,13 @@ if __name__ == "__main__":
     print(f"Salt: {salt}")
     print(f"Encrypted: {encrypted}")
 
+    filename = 'encrypted_data.bin'
+    encryptor.save_to_file(filename, encrypted)
+    print(f"Encrypted data saved to {filename}")
+
     password = input("Enter the password for decryption: ")
 
-    decryptor = Decryptor(password, salt)
-    decrypted = decryptor.decrypt(encrypted)
+    encrypted_data = Decryptor.read_from_file(filename)
+    decryptor = Decryptor(password)
+    decrypted = decryptor.decrypt(encrypted_data)
     print(f"Decrypted: {decrypted}")
